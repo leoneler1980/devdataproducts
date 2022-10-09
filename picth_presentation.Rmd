@@ -1,0 +1,164 @@
+---
+title: "Week 4's project: Shiny Application and Reproducible Pitch"
+author: "Leonel E. Lerebours"
+date: "`r Sys.Date()`"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Overview
+
+- TB is caused by the bacillus Mycobacterium tuberculosis, which is spread when people who are sick with TB
+  expel bacteria into the air (e.g. by coughing).
+  
+- TB is curable and preventable. About 85% of people who develop TB disease can be successfully treated with
+a 6-month drug regimen and regimens of 1–6 months can be used to treat TB infection.
+
+- The World Health Organization (WHO) has published a global TB report every year since 1997; 
+All the Countries most report all the diagnosed TB cases and also WHO generates estimates of how many cases
+are expected in each country.
+
+- With the estimations, countries plans ahead how many commodities will be needed for diagnosis and treatment.
+
+- The purpose of this simple tool is asses the difference between the estimated TB cases by WHO and the TB cases reported
+
+## how to use the TB comparison tool
+
+- the link of the tool is [here](https://leoneler.shinyapps.io/tb_data_world_comparion/?_ga=2.227718813.1437403525.1665342709-911882185.1665342709)
+
+- In the first tab you will see two selection box to select the **Country** and the **year** to display the data table
+
+- In the second tab you will see the graph of the **Country** selected
+
+- Here you can find the link of the code in [github](https://github.com/leoneler1980/devdataproducts) inside of the folder "tb_data_world"
+
+-The data used in this tool is from the data repository of the WHO [here](https://www.who.int/teams/global-tuberculosis-programme/data#csv_files)
+
+
+## Code used for the ui.R
+
+```{r eval=FALSE, echo=TRUE}
+
+library(shiny)
+library(plotly)
+
+# Define UI for application that draws a histogram
+shinyUI(fluidPage(
+  
+  tags$style('.container-fluid {
+                             background-color: #EEE9E9
+              }'),
+  
+  fluidRow(column(12,align ="center",
+                  div(img(src="https://cdn2.vectorstock.com/i/thumb-large/83/06/tuberculosis-black-glyph-icon-contagious-vector-39918306.jpg", height=80, width=110))),
+           
+           fluidRow(column(12, align = 'center', 
+                           div(style = "font-size: 10px; padding: 0px 0px; margin-top:-2em"),
+                           titlePanel(windowTitle = 'TB Dat Comparison',
+                                      title = "TB data analysis"))
+           )
+  ),
+  
+  # Application title
+  titlePanel(h4("Comparison of Tuberculosis Estiamated and Reported Cases by Countries", align="center")),
+  
+  sidebarLayout(
+    
+    sidebarPanel(
+      uiOutput("conlist"),
+      uiOutput("yearlist")),
+    
+    mainPanel(
+      tabsetPanel(type = "tabs",
+      tabPanel("Line List", br(), dataTableOutput("table")),
+      tabPanel("Graph", br(), plotlyOutput(outputId = "plot"),
+               h5("% at bottom is the differences between estimated cases (dots) vs. reported (line)", align="center"),
+               h6("Source: https://www.who.int/teams/global-tuberculosis-programme/data#csv_files", align="center")))))))
+
+
+```
+
+## Code used for server.r
+
+```{r eval=FALSE, echo=TRUE}
+
+library(shiny)
+library(tidyverse)
+
+
+# Get the data
+df1 <- read_csv("https://extranet.who.int/tme/generateCSV.asp?ds=estimates")
+df2 <- read_csv("https://extranet.who.int/tme/generateCSV.asp?ds=notifications")
+
+df <- df1 %>% 
+  left_join(df2, suffix = c("_est","_rep" ),  by=c("country", "year")) %>% 
+  select(country,g_whoregion_est, year, e_inc_num, c_newinc) %>% 
+  mutate(c_newinc=if_else(is.na(c_newinc),0,c_newinc),
+         diff=scales::percent((c_newinc/e_inc_num)-1,1.1)) %>% 
+  filter(year>=2010)
+
+
+#countries
+
+shinyServer(function(input, output) {
+  output$conlist <- renderUI({
+    
+    conlist <- sort(unique(as.vector(df$country)), decreasing = FALSE)
+    conlist <- append(conlist, "All", after =  0)
+    selectizeInput("conchoose", "Country:", conlist)
+    
+  })
+ 
+  output$yearlist <- renderUI({
+    
+    yearlist <- sort(unique(as.vector(df$year)), decreasing = FALSE)
+    yearlist <- append(yearlist, "All", 0)
+    selectizeInput("yearchoose", "year:", yearlist)
+  }) 
+  
+  
+  data <- reactive({
+    req(input$conchoose)
+    req(input$yearchoose)
+    if(input$conchoose == "All") {
+      filt1 <- quote(country != "@?><")} 
+    else {filt1 <- quote(country == input$conchoose) }
+    if (input$yearchoose == "All") {
+      
+      filt2 <- quote(year != "")} 
+    else {filt2 <- quote(year == input$yearchoose)}
+    df %>%
+      filter_(filt1) %>%
+      filter_(filt2) %>% 
+      rename(Country=country,
+             Region=g_whoregion_est,
+             Year=year,
+             `Estimated cases`=e_inc_num,
+             `Reported cases`=c_newinc,
+             `Difference Estimated vs. reported`=diff)})
+  output$table <- renderDataTable({
+    data()})
+  output$plot <- renderPlotly({
+    ggplotly({
+      p <- ggplot(data(), aes_string(color="Region")) + 
+        geom_point(aes_string(x="factor(Year)", y="`Estimated cases`"), alpha = 0.5) + 
+        geom_line(aes_string(x="factor(Year)", y="`Reported cases`", group="Region"), alpha = 0.5) +
+        geom_text(aes_string(x="factor(Year)", y=0,
+                             label="`Difference Estimated vs. reported`"),
+                  check_overlap = T, size=2,
+                  nudge_y = 2) + 
+        scale_y_continuous(label=scales::comma, limits = c(0,NA))+
+        theme(legend.position = "bottom") +
+        theme_minimal()+
+        labs(x="Years",
+             y="Number of cases",
+             color="Region")
+      p})})})
+
+
+
+```
+
